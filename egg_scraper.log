@@ -1,0 +1,23 @@
+2025-06-01 16:21:30,042 - INFO - Starting daily egg price scraping...
+2025-06-01 16:21:31,706 - INFO - Parsed 34 city records
+2025-06-01 16:21:31,707 - INFO - Found 34 unique cities
+2025-06-01 16:21:31,708 - INFO - Creating new monthly file: egg_data\egg_prices_2025_06.csv
+2025-06-01 16:21:31,720 - INFO - Successfully updated monthly CSV: egg_data\egg_prices_2025_06.csv
+2025-06-01 16:21:31,723 - INFO - Saved daily backup: egg_data\daily_prices_20250601.csv
+2025-06-01 16:21:31,723 - INFO - Daily scraping completed successfully!
+2025-06-02 08:56:52,595 - INFO - Starting daily egg price scraping...
+2025-06-02 08:56:54,935 - INFO - Parsed 34 city records
+2025-06-02 08:56:54,935 - INFO - Found 34 unique cities
+2025-06-02 08:56:54,947 - INFO - Loaded existing monthly file: egg_data\egg_prices_2025_06.csv
+2025-06-02 08:56:54,948 - INFO - Updating existing data for day 2
+2025-06-02 08:56:54,965 - INFO - Successfully updated monthly CSV: egg_data\egg_prices_2025_06.csv
+2025-06-02 08:56:54,974 - INFO - Saved daily backup: egg_data\daily_prices_20250602.csv
+2025-06-02 08:56:54,975 - INFO - Daily scraping completed successfully!
+2025-06-28 22:03:00,989 - INFO - Starting daily egg price scraping...
+2025-06-28 22:03:04,485 - INFO - Parsed 34 city records
+2025-06-28 22:03:04,485 - INFO - Found 34 unique cities
+2025-06-28 22:03:04,485 - INFO - Loaded existing monthly file: egg_data\egg_prices_2025_06.csv
+2025-06-28 22:03:04,485 - INFO - Updating existing data for day 28
+2025-06-28 22:03:04,503 - INFO - Successfully updated monthly CSV: egg_data\egg_prices_2025_06.csv
+2025-06-28 22:03:04,505 - INFO - Saved daily backup: egg_data\daily_prices_20250628.csv
+2025-06-28 22:03:04,506 - INFO - Daily scraping completed successfully!
