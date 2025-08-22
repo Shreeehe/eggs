@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 import glob
 import logging
@@ -44,7 +44,6 @@ class EggPriceDashboard:
             st.error(f"Error loading data: {e}")
             return None, None, None
     
-    # ... (the rest of your class methods remain the same) ...
     def get_current_prices(self, df, day):
         """Get a specific day's prices"""
         day_col = str(day)
@@ -63,7 +62,120 @@ class EggPriceDashboard:
         
         return current_data.sort_values("Price", ascending=False)
     
-    # ... (the rest of your class methods remain the same) ...
+    def get_price_trends(self, df, city):
+        """Get price trend for a specific city"""
+        try:
+            city_row = df[df["Name Of Zone / Day"] == city]
+            if city_row.empty:
+                return None
+                
+            city_data = city_row.iloc[0]
+            
+            # Extract daily prices
+            prices = []
+            dates = []
+            
+            for day in range(1, 32):
+                day_col = str(day)
+                if day_col in city_data and city_data[day_col] != "-":
+                    try:
+                        price = float(city_data[day_col])
+                        prices.append(price)
+                        # Create date (assuming current month/year for now)
+                        date = datetime.now().replace(day=day)
+                        dates.append(date)
+                    except:
+                        pass
+            
+            if not prices:
+                return None
+                
+            trend_df = pd.DataFrame({
+                "Date": dates,
+                "Price": prices
+            })
+            
+            return trend_df
+            
+        except Exception as e:
+            st.error(f"Error getting trends for {city}: {e}")
+            return None
+    
+    def create_price_map(self, current_data):
+        """Create a price comparison chart (placeholder for map)"""
+        if current_data is None or current_data.empty:
+            return None
+            
+        fig = px.bar(
+            current_data.head(20),  # Top 20 cities
+            x="Price",
+            y="City",
+            orientation="h",
+            title="Current Egg Prices by City (₹ per 100 eggs)",
+            color="Price",
+            color_continuous_scale="RdYlGn_r"
+        )
+        
+        fig.update_layout(
+            height=600,
+            yaxis={"categoryorder": "total ascending"}
+        )
+        
+        return fig
+    
+    def create_trend_chart(self, trend_data, city):
+        """Create price trend chart for a city"""
+        if trend_data is None or trend_data.empty:
+            return None
+            
+        fig = go.Figure()
+        
+        fig.add_trace(go.Scatter(
+            x=trend_data["Date"],
+            y=trend_data["Price"],
+            mode="lines+markers",
+            name=f"{city} Price Trend",
+            line=dict(width=3),
+            marker=dict(size=8)
+        ))
+        
+        fig.update_layout(
+            title=f"Egg Price Trend - {city}",
+            xaxis_title="Date",
+            yaxis_title="Price (₹ per 100 eggs)",
+            hovermode="x unified"
+        )
+        
+        return fig
+    
+    def display_statistics(self, current_data):
+        """Display key statistics"""
+        if current_data is None or current_data.empty:
+            st.warning("No current price data available")
+            return
+            
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            avg_price = current_data["Price"].mean()
+            st.metric("Average Price", f"₹{avg_price:.0f}")
+        
+        with col2:
+            max_price = current_data["Price"].max()
+            if not pd.isna(max_price):
+                max_city = current_data[current_data["Price"] == max_price]["City"].iloc[0]
+                st.metric("Highest Price", f"₹{max_price:.0f}", f"{max_city}")
+        
+        with col3:
+            min_price = current_data["Price"].min()
+            if not pd.isna(min_price):
+                min_city = current_data[current_data["Price"] == min_price]["City"].iloc[0]
+                st.metric("Lowest Price", f"₹{min_price:.0f}", f"{min_city}")
+        
+        with col4:
+            price_range = current_data["Price"].max() - current_data["Price"].min()
+            if not pd.isna(price_range):
+                st.metric("Price Range", f"₹{price_range:.0f}")
 
 def main():
     """Main Streamlit app"""
@@ -97,9 +209,6 @@ def main():
         st.error("Failed to load data for the selected month.")
         return
     
-    # Display current month info
-    st.info(f"📅 Showing data for: **{datetime(year, month, 1).strftime('%B %Y')}**")
-    
     # Get a list of available days for the selected month
     available_days = [col for col in df.columns if col.isdigit()]
     
@@ -110,7 +219,7 @@ def main():
     else:
         st.info("No daily data available for this month.")
         selected_day = None
-    
+
     # Auto-refresh
     if st.button("🔄 Refresh Data"):
         st.rerun()
