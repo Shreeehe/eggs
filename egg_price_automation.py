@@ -1,298 +1,247 @@
-import streamlit as st
+#!/usr/bin/env python3
+"""
+Automated Egg Price Scraper for Raspberry Pi
+Scrapes NECC egg prices daily and maintains monthly CSV files
+"""
+
+import requests
+from datetime import datetime
 import pandas as pd
-import plotly.express as px
-import plotly.graph_objects as go
-from datetime import datetime, timedelta
-from pathlib import Path
-import glob
+from bs4 import BeautifulSoup
+import os
 import logging
+from pathlib import Path
 
-# Page config
-st.set_page_config(
-    page_title="Egg Price Dashboard",
-    page_icon="🥚",
-    layout="wide",
-    initial_sidebar_state="expanded"
+# Setup logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('egg_scraper.log'),
+        logging.StreamHandler()
+    ]
 )
+logger = logging.getLogger(__name__)
 
-class EggPriceDashboard:
+class EggPriceScraper:
     def __init__(self, data_dir="egg_data"):
+        self.url = "https://www.e2necc.com/home/eggprice"
         self.data_dir = Path(data_dir)
+        self.data_dir.mkdir(exist_ok=True)
         
-    def get_all_monthly_files(self):
-        """Get a list of all available monthly CSV files"""
+    def scrape_website(self):
+        """Scrape live data from NECC website"""
         try:
-            csv_files = sorted(self.data_dir.glob("egg_prices_*.csv"), reverse=True)
-            return csv_files
-        except Exception as e:
-            st.error(f"Error finding data files: {e}")
-            return []
-
-    def load_monthly_data(self, file_path):
-        """Load and process monthly data"""
-        try:
-            df = pd.read_csv(file_path)
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
             
-            # Get file info
-            filename = file_path.name
-            year_month = filename.replace("egg_prices_", "").replace(".csv", "")
-            year, month = year_month.split("_")
+            response = requests.get(self.url, headers=headers, timeout=30)
+            response.raise_for_status()
             
-            return df, int(year), int(month)
+            soup = BeautifulSoup(response.content, "html.parser")
+            table = soup.find("table", {"border": "1px"})
             
-        except Exception as e:
-            st.error(f"Error loading data: {e}")
-            return None, None, None
-    
-    def get_current_prices(self, df, day):
-        """Get a specific day's prices"""
-        day_col = str(day)
-        
-        if day_col not in df.columns:
-            return None
-            
-        current_data = df[["Name Of Zone / Day", day_col]].copy()
-        current_data.columns = ["City", "Price"]
-        
-        current_data = current_data[current_data["Price"] != "-"]
-        current_data = current_data[current_data["Price"].notna()]
-        
-        current_data["Price"] = pd.to_numeric(current_data["Price"], errors="coerce")
-        current_data = current_data.dropna()
-        
-        return current_data.sort_values("Price", ascending=False)
-    
-    def get_price_trends(self, df, city):
-        """Get price trend for a specific city"""
-        try:
-            city_row = df[df["Name Of Zone / Day"] == city]
-            if city_row.empty:
-                return None
+            if not table:
+                raise ValueError("Target table not found on website")
                 
-            city_data = city_row.iloc[0]
-            
-            # Extract daily prices
-            prices = []
-            dates = []
-            
-            for day in range(1, 32):
-                day_col = str(day)
-                if day_col in city_data and city_data[day_col] != "-":
-                    try:
-                        price = float(city_data[day_col])
-                        prices.append(price)
-                        # Create date (assuming current month/year for now)
-                        date = datetime.now().replace(day=day)
-                        dates.append(date)
-                    except:
-                        pass
-            
-            if not prices:
-                return None
-                
-            trend_df = pd.DataFrame({
-                "Date": dates,
-                "Price": prices
-            })
-            
-            return trend_df
+            return soup
             
         except Exception as e:
-            st.error(f"Error getting trends for {city}: {e}")
-            return None
+            logger.error(f"Failed to scrape website: {e}")
+            raise
     
-    def create_price_map(self, current_data):
-        """Create a price comparison chart (placeholder for map)"""
-        if current_data is None or current_data.empty:
-            return None
+    def parse_table(self, soup):
+        """Parse HTML table into DataFrame"""
+        try:
+            table = soup.find("table", {"border": "1px"})
+            rows = table.find_all("tr")
             
-        fig = px.bar(
-            current_data.head(20),  # Top 20 cities
-            x="Price",
-            y="City",
-            orientation="h",
-            title="Current Egg Prices by City (₹ per 100 eggs)",
-            color="Price",
-            color_continuous_scale="RdYlGn_r"
-        )
-        
-        fig.update_layout(
-            height=600,
-            yaxis={"categoryorder": "total ascending"}
-        )
-        
-        return fig
+            # Parse table
+            data = []
+            for row in rows:
+                cols = row.find_all(["td", "th"])
+                cols = [col.get_text(strip=True) for col in cols]
+                if cols:
+                    data.append(cols)
+            
+            if not data:
+                raise ValueError("No data found in table")
+                
+            df = pd.DataFrame(data[1:], columns=data[0])
+            
+            # Clean data - remove header rows
+            df = df[df["Name Of Zone / Day"] != "NECC SUGGESTED EGG PRICES"]
+            df = df[df["Name Of Zone / Day"] != "Prevailing Prices"]
+            df = df[df["Name Of Zone / Day"].notna()]
+            
+            logger.info(f"Parsed {len(df)} city records")
+            return df
+            
+        except Exception as e:
+            logger.error(f"Failed to parse table: {e}")
+            raise
     
-    def create_trend_chart(self, trend_data, city):
-        """Create price trend chart for a city"""
-        if trend_data is None or trend_data.empty:
-            return None
-            
-        fig = go.Figure()
+    def get_clean_cities(self, df):
+        """Extract and clean city list"""
+        city_column = df["Name Of Zone / Day"]
+        city_list = city_column.dropna().tolist()
         
-        fig.add_trace(go.Scatter(
-            x=trend_data["Date"],
-            y=trend_data["Price"],
-            mode="lines+markers",
-            name=f"{city} Price Trend",
-            line=dict(width=3),
-            marker=dict(size=8)
-        ))
+        # Remove non-city headers
+        city_list = [city for city in city_list 
+                    if "egg price" not in city.lower() 
+                    and "price" not in city.lower()
+                    and city.strip() != ""]
         
-        fig.update_layout(
-            title=f"Egg Price Trend - {city}",
-            xaxis_title="Date",
-            yaxis_title="Price (₹ per 100 eggs)",
-            hovermode="x unified"
-        )
+        # Deduplicate and sort
+        fixed_city_list = sorted(set(city_list))
         
-        return fig
+        logger.info(f"Found {len(fixed_city_list)} unique cities")
+        return fixed_city_list
     
-    def display_statistics(self, current_data):
-        """Display key statistics"""
-        if current_data is None or current_data.empty:
-            st.warning("No current price data available")
-            return
+    def get_monthly_csv_path(self, date=None):
+        """Get path for monthly CSV file"""
+        if date is None:
+            date = datetime.now()
+        
+        filename = f"egg_prices_{date.year}_{date.month:02d}.csv"
+        return self.data_dir / filename
+    
+    def update_monthly_csv(self, df, cities):
+        """Update or create monthly CSV with today's data"""
+        today = datetime.now()
+        today_col = str(today.day)
+        csv_path = self.get_monthly_csv_path(today)
+        
+        try:
+            # Filter data for clean cities
+            city_df = df[df["Name Of Zone / Day"].isin(cities)].copy()
             
-        col1, col2, col3, col4 = st.columns(4)
-        
-        with col1:
-            avg_price = current_data["Price"].mean()
-            st.metric("Average Price", f"₹{avg_price:.0f}")
-        
-        with col2:
-            max_price = current_data["Price"].max()
-            if not pd.isna(max_price):
-                max_city = current_data[current_data["Price"] == max_price]["City"].iloc[0]
-                st.metric("Highest Price", f"₹{max_price:.0f}", f"{max_city}")
-        
-        with col3:
-            min_price = current_data["Price"].min()
-            if not pd.isna(min_price):
-                min_city = current_data[current_data["Price"] == min_price]["City"].iloc[0]
-                st.metric("Lowest Price", f"₹{min_price:.0f}", f"{min_city}")
-        
-        with col4:
-            price_range = current_data["Price"].max() - current_data["Price"].min()
-            if not pd.isna(price_range):
-                st.metric("Price Range", f"₹{price_range:.0f}")
+            if csv_path.exists():
+                # Load existing monthly data
+                monthly_df = pd.read_csv(csv_path)
+                logger.info(f"Loaded existing monthly file: {csv_path}")
+                
+                # Update today's column
+                if today_col in monthly_df.columns:
+                    logger.info(f"Updating existing data for day {today_col}")
+                else:
+                    logger.info(f"Adding new column for day {today_col}")
+                    monthly_df[today_col] = "-"
+                
+                # Update prices for cities that have data
+                for _, row in city_df.iterrows():
+                    city_name = row["Name Of Zone / Day"]
+                    if today_col in row and row[today_col] != "-":
+                        # Find city in monthly_df and update
+                        mask = monthly_df["Name Of Zone / Day"] == city_name
+                        if mask.any():
+                            monthly_df.loc[mask, today_col] = row[today_col]
+                        else:
+                            # Add new city if not exists
+                            new_row = {col: "-" for col in monthly_df.columns}
+                            new_row["Name Of Zone / Day"] = city_name
+                            new_row[today_col] = row[today_col]
+                            monthly_df = pd.concat([monthly_df, pd.DataFrame([new_row])], ignore_index=True)
+                
+            else:
+                # Create new monthly file
+                logger.info(f"Creating new monthly file: {csv_path}")
+                
+                # Create columns for all days of the month
+                import calendar
+                days_in_month = calendar.monthrange(today.year, today.month)[1]
+                columns = ["Name Of Zone / Day"] + [str(i) for i in range(1, days_in_month + 1)] + ["Average"]
+                
+                # Initialize monthly dataframe
+                monthly_data = []
+                for city in cities:
+                    row = {col: "-" for col in columns}
+                    row["Name Of Zone / Day"] = city
+                    monthly_data.append(row)
+                
+                monthly_df = pd.DataFrame(monthly_data)
+                
+                # Add today's data
+                for _, row in city_df.iterrows():
+                    city_name = row["Name Of Zone / Day"]
+                    if today_col in row and row[today_col] != "-":
+                        mask = monthly_df["Name Of Zone / Day"] == city_name
+                        if mask.any():
+                            monthly_df.loc[mask, today_col] = row[today_col]
+            
+            # Calculate average (excluding "-" values)
+            def calc_average(row):
+                prices = []
+                for col in [str(i) for i in range(1, 32)]:
+                    if col in row and row[col] != "-" and pd.notna(row[col]):
+                        try:
+                            prices.append(float(row[col]))
+                        except:
+                            pass
+                return round(sum(prices) / len(prices), 2) if prices else "-"
+            
+            monthly_df["Average"] = monthly_df.apply(calc_average, axis=1)
+            
+            # Save updated monthly file
+            monthly_df.to_csv(csv_path, index=False, encoding="utf-8-sig")
+            logger.info(f"Successfully updated monthly CSV: {csv_path}")
+            
+            return csv_path
+            
+        except Exception as e:
+            logger.error(f"Failed to update monthly CSV: {e}")
+            raise
+    
+    def run_daily_scrape(self):
+        """Main function to run daily scraping"""
+        try:
+            logger.info("Starting daily egg price scraping...")
+            
+            # Scrape website
+            soup = self.scrape_website()
+            
+            # Parse table
+            df = self.parse_table(soup)
+            
+            # Get clean cities
+            cities = self.get_clean_cities(df)
+            
+            # Update monthly CSV
+            csv_path = self.update_monthly_csv(df, cities)
+            
+            # Save today's simple format too (for backup)
+            today = datetime.now()
+            today_col = str(today.day)
+            
+            city_df = df[df["Name Of Zone / Day"].isin(cities)].copy()
+            if today_col in df.columns:
+                result = city_df[["Name Of Zone / Day", today_col]].copy()
+                result.columns = ["City", "Rate"]
+                
+                daily_path = self.data_dir / f"daily_prices_{today.strftime('%Y%m%d')}.csv"
+                result.to_csv(daily_path, index=False, encoding="utf-8-sig")
+                logger.info(f"Saved daily backup: {daily_path}")
+            
+            logger.info("Daily scraping completed successfully!")
+            return csv_path
+            
+        except Exception as e:
+            logger.error(f"Daily scraping failed: {e}")
+            raise
 
 def main():
-    """Main Streamlit app"""
+    """Main entry point"""
+    scraper = EggPriceScraper()
     
-    # Title and header
-    st.title("Egg Price Dashboard 🥚")
-    st.markdown("Real-time egg price monitoring across India")
-    
-    # Initialize dashboard
-    dashboard = EggPriceDashboard()
-    
-    # Get all available files
-    available_files = dashboard.get_all_monthly_files()
-    if not available_files:
-        st.error("No data files found. Please run the scraper first.")
-        st.code("python egg_price_automation.py")
-        return
+    try:
+        csv_path = scraper.run_daily_scrape()
+        print(f"✅ Successfully updated: {csv_path}")
         
-    # Create month selector dropdown
-    file_options = {file.stem.replace("egg_prices_", ""): file for file in available_files}
-    selected_month = st.selectbox("Select Month", options=list(file_options.keys()), format_func=lambda x: datetime.strptime(x, "%Y_%m").strftime("%B %Y"))
+    except Exception as e:
+        print(f"❌ Scraping failed: {e}")
+        return 1
     
-    if not selected_month:
-        st.warning("Please select a month to view data.")
-        return
-    
-    # Load data for the selected month
-    df, year, month = dashboard.load_monthly_data(file_options[selected_month])
-    
-    if df is None:
-        st.error("Failed to load data for the selected month.")
-        return
-    
-    # Get a list of available days for the selected month
-    available_days = [col for col in df.columns if col.isdigit()]
-    
-    # Create day selector
-    if available_days:
-        max_day = max([int(d) for d in available_days])
-        selected_day = st.slider("Select Day", 1, max_day, max_day)
-    else:
-        st.info("No daily data available for this month.")
-        selected_day = None
-
-    # Auto-refresh
-    if st.button("🔄 Refresh Data"):
-        st.rerun()
-
-    # Get current prices for the selected day
-    current_data = dashboard.get_current_prices(df, selected_day)
-    
-    # Display statistics
-    st.subheader("📊 Daily Market Summary")
-    dashboard.display_statistics(current_data)
-    
-    st.divider()
-    
-    # Create two columns for layout
-    col1, col2 = st.columns([2, 1])
-    
-    with col1:
-        # Price comparison chart
-        st.subheader("🗺️ Prices by City")
-        
-        if current_data is not None and not current_data.empty:
-            price_chart = dashboard.create_price_map(current_data)
-            if price_chart:
-                st.plotly_chart(price_chart, use_container_width=True)
-        else:
-            st.warning("No price data available for the selected day")
-    
-    with col2:
-        # City selector for trends
-        st.subheader("📈 Price Trends")
-        
-        if current_data is not None and not current_data.empty:
-            cities = sorted(current_data["City"].tolist())
-            selected_city = st.selectbox("Select City", cities)
-            
-            if selected_city:
-                trend_data = dashboard.get_price_trends(df, selected_city)
-                
-                if trend_data is not None:
-                    trend_chart = dashboard.create_trend_chart(trend_data, selected_city)
-                    if trend_chart:
-                        st.plotly_chart(trend_chart, use_container_width=True)
-                    
-                    # Show trend stats
-                    if len(trend_data) > 1:
-                        latest_price = trend_data["Price"].iloc[-1]
-                        prev_price = trend_data["Price"].iloc[-2]
-                        change = latest_price - prev_price
-                        change_pct = (change / prev_price) * 100
-                        
-                        if change > 0:
-                            st.success(f"📈 +₹{change:.0f} (+{change_pct:.1f}%)")
-                        elif change < 0:
-                            st.error(f"📉 ₹{change:.0f} ({change_pct:.1f}%)")
-                        else:
-                            st.info("➡️ No change")
-                else:
-                    st.info(f"No trend data available for {selected_city}")
-        else:
-            st.info("No cities available for trend analysis")
-    
-    st.divider()
-    
-    # Raw data table
-    with st.expander("📋 View Raw Data"):
-        st.dataframe(df, use_container_width=True)
-    
-    # Footer
-    st.markdown("---")
-    st.markdown(
-        "📍 Data source: [NECC](https://www.e2necc.com/home/eggprice) | "
-        f"🕒 Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-    )
+    return 0
 
 if __name__ == "__main__":
-    main()
+    exit(main())
