@@ -2,14 +2,14 @@ name: Daily Egg Price Scraper
 
 on:
   schedule:
-    # Runs at 10:00 AM UTC every day
     - cron: '0 10 * * *'
   workflow_dispatch:
-    # This allows you to run the workflow manually from the GitHub Actions tab
 
 jobs:
   scrape_and_update:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
 
     steps:
       - name: 📦 Checkout repository
@@ -28,6 +28,10 @@ jobs:
       - name: 🥚 Run the scraper script
         run: |
           python egg_price_automation.py
+
+      - name: ⬇️ Pull latest changes before push
+        run: |
+          git pull origin main || echo "Nothing to pull"
 
       - name: ⬆️ Commit and push updated data
         run: |
